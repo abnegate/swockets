@@ -1,2 +1,3 @@
-# swockets
-Easy to use swift web-socket client
+# Swockets
+
+A description of this package.
