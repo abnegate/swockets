@@ -6,14 +6,14 @@ import Foundation
 import NIO
 import NIOHTTP1
 
-public protocol WebSocketClientDelegate {
+public protocol SwocketClientDelegate {
     func onText(text: String)
     func onBinary(data: Data)
     func onClose(channel: Channel, data: Data)
     func onError(error: Error?, status: HTTPResponseStatus?)
 }
 
-extension WebSocketClientDelegate {
+extension SwocketClientDelegate {
     func onText(text: String) {
     }
 

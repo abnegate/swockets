@@ -16,6 +16,7 @@ public class SwocketClient {
     let port: Int
     let uri: String
     var channel: Channel? = nil
+    public var maxFrameSize: Int
     var tlsEnabled: Bool = false
 
     let callbackQueue = DispatchQueue(label: "CallbackSync")
@@ -101,6 +102,7 @@ public class SwocketClient {
         port: Int,
         uri: String,
         requestKey: String,
+        maxFrameSize: Int = 14,
         tlsEnabled: Bool = false,
         onOpen: @escaping (Channel?) -> Void = { _ in}
     ) {
@@ -108,6 +110,7 @@ public class SwocketClient {
         self.port = port
         self.uri = uri
         self.onOpenCallback = onOpen
+        self.maxFrameSize = maxFrameSize
         self.tlsEnabled = tlsEnabled
     }
 
@@ -116,6 +119,7 @@ public class SwocketClient {
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 8080
         self.uri = rawUrl?.path ?? "/"
+        self.maxFrameSize = 24
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
     }
 
