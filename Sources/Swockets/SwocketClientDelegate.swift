@@ -6,7 +6,7 @@ import Foundation
 import NIO
 import NIOHTTP1
 
-public protocol SwocketClientDelegate {
+public protocol SwocketClientDelegate : AnyObject {
     func onText(text: String)
     func onBinary(data: Data)
     func onClose(channel: Channel, data: Data)
