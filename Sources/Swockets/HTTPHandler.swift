@@ -43,6 +43,28 @@ class HTTPHandler: ChannelInboundHandler, RemovableChannelHandler {
             client.onErrorCallBack(error, nil)
         }
     }
+
+    func upgradeFailure(status: HTTPResponseStatus) {
+        if let delegate = client.delegate {
+            switch status {
+            case .badRequest:
+                delegate.onError(error: SwocketClientError.badRequest, status: status)
+            case .notFound:
+                delegate.onError(error: SwocketClientError.notFound, status: status)
+            default:
+                break
+            }
+        } else {
+            switch status {
+            case .badRequest:
+                client.onErrorCallBack(SwocketClientError.badRequest, status)
+            case .notFound:
+                client.onErrorCallBack(SwocketClientError.notFound, status)
+            default:
+                break
+            }
+        }
+    }
 }
 
 extension HTTPVersion {
