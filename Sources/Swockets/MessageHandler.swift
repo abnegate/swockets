@@ -52,11 +52,52 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                 }
                 string = text
             }
+        case .continuation:
+            let data = unmaskedData(frame: frame)
+            if isText {
+                if frame.fin {
+                    guard let text = data.getString(at: 0, length: data.readableBytes) else {
+                        return
+                    }
+                    string.append(text)
+                    isText = false
+                    if let delegate = client.delegate {
+                        delegate.onText(text: string)
+                    } else {
+                        client.onTextCallback(string)
+                    }
+                } else {
+                    guard let text = data.getString(at: 0, length: data.readableBytes) else {
+                        return
+                    }
+                    string.append(text)
+                }
+            } else {
+                if frame.fin {
+                    guard let binaryData = data.getData(at: 0, length: data.readableBytes) else {
+                        return
+                    }
+                    binaryBuffer.append(binaryData)
+                    if let delegate = client.delegate {
+                        delegate.onBinary(data: binaryBuffer)
+                    } else {
+                        client.onBinaryCallback(binaryBuffer)
+                    }
+                } else {
+                    guard let binaryData = data.getData(at: 0, length: data.readableBytes) else {
+                        return
+                    }
+                    binaryBuffer.append(binaryData)
+                }
+            }
         case .connectionClose:
             guard frame.fin else {
                 return
             }
             let data = frame.data
+            if !client.closeSent {
+                client.close(data: frame.data.getData(at: 0, length: frame.data.readableBytes) ?? Data())
+            }
             if let delegate = client.delegate {
                 delegate.onClose(channel: context.channel, data: data.getData(at: 0, length: data.readableBytes)!)
             } else {
