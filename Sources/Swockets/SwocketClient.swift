@@ -23,7 +23,7 @@ public class SwocketClient {
 
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
 
-    public var delegate: WebSocketClientDelegate? = nil
+    weak var delegate: SwocketClientDelegate? = nil
 
     var closeSent: Bool = false
 
@@ -104,23 +104,32 @@ public class SwocketClient {
         requestKey: String,
         maxFrameSize: Int = 14,
         tlsEnabled: Bool = false,
+        delegate: SwocketClientDelegate? = nil,
         onOpen: @escaping (Channel?) -> Void = { _ in}
     ) {
+        self.requestKey = requestKey
         self.host = host
         self.port = port
         self.uri = uri
         self.onOpenCallback = onOpen
         self.maxFrameSize = maxFrameSize
         self.tlsEnabled = tlsEnabled
+        self.delegate = delegate
+        self.onOpenCallback = onOpen
     }
 
-    public init?(_ url: String) {
+    public init?(
+        _ url: String,
+        delegate: SwocketClientDelegate? = nil
+    ) {
+        self.requestKey = "test"
         let rawUrl = URL(string: url)
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 8080
         self.uri = rawUrl?.path ?? "/"
         self.maxFrameSize = 24
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
+        self.delegate = delegate
     }
 
     // MARK: - Open connection
