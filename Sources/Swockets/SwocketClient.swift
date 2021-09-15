@@ -10,22 +10,28 @@ import Dispatch
 import NIOFoundationCompat
 import NIOSSL
 
+
+public let SWOCKET_LOCKER_QUEUE = "SyncLocker"
+
 public class SwocketClient {
 
+    // MARK: - Properties
+    let frameKey: String
     let host: String
     let port: Int
     let uri: String
-    var channel: Channel? = nil
+    
     public var maxFrameSize: Int
+    
+    var channel: Channel? = nil
     var tlsEnabled: Bool = false
-
-    let callbackQueue = DispatchQueue(label: "CallbackSync")
-
-    let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    var closeSent: Bool = false
+    
+    let upgradedSignalled = DispatchSemaphore(value: 0)
+    let locker = DispatchQueue(label: SWOCKET_LOCKER_QUEUE)
+    let threadGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
 
     weak var delegate: SwocketClientDelegate? = nil
-
-    var closeSent: Bool = false
 
     public var isConnected: Bool {
         channel?.isActive ?? false
@@ -33,96 +39,126 @@ public class SwocketClient {
     
     // MARK: - Stored callbacks
     
-    var onOpenCallback: (Channel) -> Void = { _ in }
+    private var onOpen: (Channel) -> Void = { _ in }
 
-    var _closeCallback: (Channel, Data) -> Void = { _,_ in }
-
-    var onCloseCallback: (Channel, Data) -> Void {
+    private var _closeCallback: (Channel, Data) -> Void = { _,_ in }
+    var onClose: (Channel, Data) -> Void {
         get {
-            return callbackQueue.sync {
+            return locker.sync {
                 return _closeCallback
             }
         }
         set {
-            callbackQueue.sync {
+            locker.sync {
                 _closeCallback = newValue
             }
         }
     }
 
-    var _textCallback: (String) -> Void = { _ in }
-
-    var onTextCallback: (String) -> Void {
+    private var _textCallback: (String) -> Void = { _ in }
+    var onTextMessage: (String) -> Void {
         get {
-            return callbackQueue.sync {
+            return locker.sync {
                 return _textCallback
             }
         }
         set {
-            callbackQueue.sync {
+            locker.sync {
                 _textCallback = newValue
             }
         }
     }
     
-    var _binaryCallback: (Data) -> Void = { _ in }
-
-    var onBinaryCallback: (Data) -> Void {
+    private var _binaryCallback: (Data) -> Void = { _ in }
+    var onBinaryMessage: (Data) -> Void {
         get {
-            return callbackQueue.sync {
+            return locker.sync {
                 return _binaryCallback
             }
         }
         set {
-            callbackQueue.sync {
+            locker.sync {
                 _binaryCallback = newValue
             }
         }
     }
     
-    var _errorCallBack: (Error?, HTTPResponseStatus?) -> Void = { _,_ in }
-
+    private var _errorCallBack: (Error?, HTTPResponseStatus?) -> Void = { _,_ in }
     var onErrorCallBack: (Error?, HTTPResponseStatus?) -> Void {
         get {
-            return callbackQueue.sync {
+            return locker.sync {
                 return _errorCallBack
             }
         }
         set {
-            callbackQueue.sync {
+            locker.sync {
                 _errorCallBack = newValue
             }
         }
     }
     
+    // MARK: - Callback setters
+    
+    public func onMessage(_ callback: @escaping (String) -> Void) {
+        onTextMessage = callback
+    }
+
+    public func onMessage(_ callback: @escaping (Data) -> Void) {
+        onBinaryMessage = callback
+    }
+
+    public func onClose(_ callback: @escaping (Channel, Data) -> Void) {
+        onClose = callback
+    }
+
+    public func onError(_ callback: @escaping (Error?, HTTPResponseStatus?) -> Void) {
+        onErrorCallBack = callback
+    }
+    
     // MARK: - Constructors
     
+    /// Create a new `WebSocketClient`.
+    ///
+    /// - parameters:
+    ///     - host: Host name of the remote server
+    ///     - port: Port number on which the remote server is listening
+    ///     - uri : The "Request-URI" of the GET method, it is used to identify the endpoint of the WebSocket connection
+    ///     - frameKey: The key sent by client which server has to include while building it's response. This helps ensure that the server does not accept connections from non-WebSocket clients.
+    ///     - maxFrameSize : Maximum allowable frame size of WebSocket client is configured using this parameter.
+    ///                      Default value is `14`.
+    ///     - tlsEnabled: Is TLS enabled for this client.
+    ///     - delegate: Delegate to handle message and error callbacks
     public init?(
         host: String,
         port: Int,
         uri: String,
-        requestKey: String,
+        frameKey: String,
         maxFrameSize: Int = 14,
         tlsEnabled: Bool = false,
         delegate: SwocketClientDelegate? = nil,
         onOpen: @escaping (Channel?) -> Void = { _ in}
     ) {
-        self.requestKey = requestKey
+        self.frameKey = frameKey
         self.host = host
         self.port = port
         self.uri = uri
-        self.onOpenCallback = onOpen
+        self.onOpen = onOpen
         self.maxFrameSize = maxFrameSize
         self.tlsEnabled = tlsEnabled
         self.delegate = delegate
-        self.onOpenCallback = onOpen
+        self.onOpen = onOpen
     }
 
+    /// Create a new `WebSocketClient`.
+    ///
+    /// - parameters:
+    ///     - url : The "Request-URl" of the GET method, it is used to identify the endpoint of the WebSocket
+    ///     - delegate: Delegate to handle message and error callbacks.
     public init?(
         _ url: String,
         delegate: SwocketClientDelegate? = nil
     ) {
-        self.requestKey = "test"
+        self.frameKey = "test"
         let rawUrl = URL(string: url)
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 8080
@@ -131,22 +167,85 @@ public class SwocketClient {
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
         self.delegate = delegate
     }
+    
+    deinit {
+        try! threadGroup.syncShutdownGracefully()
+    }
 
     // MARK: - Open connection
     
     public func connect() throws {
         do {
-            try makeConnection()
+            try openConnection()
         } catch {
             throw SwocketClientConnectionError.connectionFailed
         }
     }
 
-    private func makeConnection() throws {
+    private func openConnection() throws {
+        let socketOptions = ChannelOptions.socket(
+            SocketOptionLevel(SOL_SOCKET),
+            SO_REUSEPORT
+        )
+        
+        let bootstrap = ClientBootstrap(group: threadGroup)
+            .channelOption(socketOptions, value: 1)
+            .channelInitializer(self.openChannel)
+        
+        try bootstrap
+            .connect(host: self.host, port: self.port)
+            .wait()
+        
+        self.upgradedSignalled.wait()
+    }
+
+    private func openChannel(channel: Channel) -> EventLoopFuture<Void> {
+        let httpHandler = HTTPHandler(client: self)
+        
+        let basicUpgrader = NIOWebSocketClientUpgrader(
+            requestKey: self.frameKey,
+            maxFrameSize: 1 << self.maxFrameSize,
+            automaticErrorHandling: false,
+            upgradePipelineHandler: self.upgradePipelineHandler
+        )
+        
+        let config: NIOHTTPClientUpgradeConfiguration = (upgraders: [basicUpgrader], completionHandler: { context in
+            context.channel.pipeline.removeHandler(httpHandler, promise: nil)
+        })
+        
+        return channel.pipeline.addHTTPClientHandlers(withClientUpgrade: config).flatMap { _ in
+            return channel.pipeline.addHandler(httpHandler).flatMap { _ in
+                if self.tlsEnabled {
+                    let tlsConfig = TLSConfiguration.makeClientConfiguration()
+                    let sslContext = try! NIOSSLContext(configuration: tlsConfig)
+                    let sslHandler = try! NIOSSLClientHandler(context: sslContext, serverHostname: self.host)
+                    return channel.pipeline.addHandler(sslHandler, position: .first)
+                } else {
+                    return channel.eventLoop.makeSucceededFuture(())
+                }
+            }
+        }
+    }
+
+    private func upgradePipelineHandler(channel: Channel, response: HTTPResponseHead) -> EventLoopFuture<Void> {
+        self.onOpen(channel)
+        
+        let handler = MessageHandler(client: self)
+        
+        if response.status == .switchingProtocols {
+            self.channel = channel
+            self.upgradedSignalled.signal()
+        }
+        
+        return channel.pipeline.addHandler(handler)
     }
 
     // MARK: - Close connection
     
+    /// Closes the connection
+    ///
+    /// - parameters:
+    ///     - data: close frame payload, must be less than 125 bytes
     public func close(data: Data = Data()) {
         closeSent = true
         
@@ -164,6 +263,13 @@ public class SwocketClient {
     
     // MARK: - Send data
 
+    /// Sends binary-formatted data to the connected server in multiple frames
+    ///
+    /// - parameters:
+    ///     - data: raw binary data to be sent in the frame
+    ///     - opcode: Websocket opcode indicating type of the frame
+    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
+    ///     - compressed: Whether to compress the current frame to be sent, by default compression is disabled
     public func send(
         binary: Data,
         opcode: WebSocketOpcode = .binary,
@@ -181,6 +287,13 @@ public class SwocketClient {
         )
     }
 
+    /// Sends text-formatted data to the connected server in multiple frames
+    ///
+    /// - parameters:
+    ///     - raw: raw text to be sent in the frame
+    ///     - opcode: Websocket opcode indicating type of the frame
+    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
+    ///     - compressed: Whether to compress the current frame to be sent, by default this set to `false`
     public func send(
         text: String,
         opcode: WebSocketOpcode = .text,
@@ -222,6 +335,13 @@ public class SwocketClient {
         }
     }
 
+    /// This function sends IOData(ByteBuffer) to the connected server
+    ///
+    /// - parameters:
+    ///     - data: ByteBuffer-formatted to be sent in the frame
+    ///     - opcode: Websocket opcode indicating type of the frame
+    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
+    ///     - compressed: Whether to compress the current frame to be sent, by default this set to `false`
     public func send(
         data: Data,
         opcode: WebSocketOpcode,
@@ -264,24 +384,5 @@ public class SwocketClient {
         } else {
             channel.write(frame, promise: nil)
         }
-    }
-
-
-    // MARK: - Callback setters
-    
-    public func onMessage(_ callback: @escaping (String) -> Void) {
-        onTextCallback = callback
-    }
-
-    public func onMessage(_ callback: @escaping (Data) -> Void) {
-        onBinaryCallback = callback
-    }
-
-    public func onClose(_ callback: @escaping (Channel, Data) -> Void) {
-        onCloseCallback = callback
-    }
-
-    public func onError(_ callback: @escaping (Error?, HTTPResponseStatus?) -> Void) {
-        onErrorCallBack = callback
     }
 }
