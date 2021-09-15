@@ -7,9 +7,7 @@ import NIO
 import NIOHTTP1
 import NIOWebSocket
 
-class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
-    
-    typealias InboundIn = WebSocketFrame
+class MessageHandler {
 
     private let client: SwocketClient
     private var buffer: ByteBuffer
@@ -22,15 +20,19 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
         self.buffer = ByteBufferAllocator().buffer(capacity: 0)
     }
     
-    public func errorCaught(context: ChannelHandlerContext, error: Error) {
-        if client.delegate != nil {
-            client.delegate?.onError(error: error, status: nil)
-        } else {
-            client.onErrorCallBack(error, nil)
+    private func unmaskedData(frame: WebSocketFrame) -> ByteBuffer {
+        var frameData = frame.data
+        if let maskingKey = frame.maskKey {
+            frameData.webSocketUnmask(maskingKey)
         }
-        client.close()
+        return frameData
     }
+}
 
+extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
+
+    typealias InboundIn = WebSocketFrame
+    
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let frame = self.unwrapInboundIn(data)
         switch frame.opcode {
@@ -41,9 +43,9 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     return
                 }
                 if let delegate = client.delegate {
-                    delegate.onText(text: text)
+                    delegate.onMessage(text: text)
                 } else {
-                    client.onTextCallback(text)
+                    client.onTextMessage(text)
                 }
             } else {
                 isText = true
@@ -51,6 +53,23 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     return
                 }
                 string = text
+            }
+        case .binary:
+            let data = unmaskedData(frame: frame)
+            if frame.fin {
+                guard let binaryData = data.getData(at: 0, length: data.readableBytes) else {
+                    return
+                }
+                if let delegate = client.delegate {
+                    delegate.onMessage(data: binaryData)
+                } else {
+                    client.onBinaryMessage(binaryData)
+                }
+            } else {
+                guard let binaryData = data.getData(at: 0, length: data.readableBytes) else {
+                    return
+                }
+                binaryBuffer = binaryData
             }
         case .continuation:
             let data = unmaskedData(frame: frame)
@@ -62,9 +81,9 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     string.append(text)
                     isText = false
                     if let delegate = client.delegate {
-                        delegate.onText(text: string)
+                        delegate.onMessage(text: string)
                     } else {
-                        client.onTextCallback(string)
+                        client.onTextMessage(string)
                     }
                 } else {
                     guard let text = data.getString(at: 0, length: data.readableBytes) else {
@@ -79,9 +98,9 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     }
                     binaryBuffer.append(binaryData)
                     if let delegate = client.delegate {
-                        delegate.onBinary(data: binaryBuffer)
+                        delegate.onMessage(data: binaryBuffer)
                     } else {
-                        client.onBinaryCallback(binaryBuffer)
+                        client.onBinaryMessage(binaryBuffer)
                     }
                 } else {
                     guard let binaryData = data.getData(at: 0, length: data.readableBytes) else {
@@ -101,18 +120,19 @@ class MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
             if let delegate = client.delegate {
                 delegate.onClose(channel: context.channel, data: data.getData(at: 0, length: data.readableBytes)!)
             } else {
-                client.onCloseCallback(context.channel, data.getData(at: 0, length: data.readableBytes)!)
+                client.onClose(context.channel, data.getData(at: 0, length: data.readableBytes)!)
             }
         default:
             break
         }
     }
     
-    private func unmaskedData(frame: WebSocketFrame) -> ByteBuffer {
-        var frameData = frame.data
-        if let maskingKey = frame.maskKey {
-            frameData.webSocketUnmask(maskingKey)
+    public func errorCaught(context: ChannelHandlerContext, error: Error) {
+        if client.delegate != nil {
+            client.delegate?.onError(error: error, status: nil)
+        } else {
+            client.onErrorCallBack(error, nil)
         }
-        return frameData
+        client.close()
     }
 }
