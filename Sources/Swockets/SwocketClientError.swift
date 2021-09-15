@@ -17,5 +17,5 @@ enum SwocketClientError: UInt, Error {
 }
 
 enum SwocketClientConnectionError: Error {
-    case connectionFailed
+    case connectionFailed(_ error: Error)
 }

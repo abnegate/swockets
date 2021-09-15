@@ -21,7 +21,7 @@ public class SwocketClient {
     let port: Int
     let uri: String
     
-    public var maxFrameSize: Int
+    public private(set) var maxFrameSize: Int
     
     var channel: Channel? = nil
     var tlsEnabled: Bool = false
@@ -177,8 +177,8 @@ public class SwocketClient {
     public func connect() throws {
         do {
             try openConnection()
-        } catch {
-            throw SwocketClientConnectionError.connectionFailed
+        } catch let error {
+            throw SwocketClientConnectionError.connectionFailed(error)
         }
     }
 
@@ -192,7 +192,7 @@ public class SwocketClient {
             .channelOption(socketOptions, value: 1)
             .channelInitializer(self.openChannel)
         
-        try bootstrap
+        _ = try bootstrap
             .connect(host: self.host, port: self.port)
             .wait()
         
