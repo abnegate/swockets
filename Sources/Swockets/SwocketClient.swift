@@ -161,7 +161,7 @@ public class SwocketClient {
         self.frameKey = "test"
         let rawUrl = URL(string: url)
         self.host = rawUrl?.host ?? "localhost"
-        self.port = rawUrl?.port ?? 8080
+        self.port = rawUrl?.port ?? 80
         self.uri = rawUrl?.path ?? "/"
         self.maxFrameSize = 24
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
