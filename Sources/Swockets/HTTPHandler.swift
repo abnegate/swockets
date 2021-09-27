@@ -4,6 +4,7 @@
 
 import NIO
 import NIOHTTP1
+import Foundation
 
 class HTTPHandler {
 
@@ -38,32 +39,42 @@ class HTTPHandler {
 
 extension HTTPHandler : ChannelInboundHandler, RemovableChannelHandler {
     
-    typealias InboundIn = HTTPClientResponsePart
+    public typealias InboundIn = HTTPClientResponsePart
+    public typealias OutboundOut = HTTPClientRequestPart
     
     func channelActive(context: ChannelHandlerContext) {
-        var request = HTTPRequestHead(
-            version: HTTPVersion(major: 1, minor: 1),
-            method: .GET,
-            uri: client.uri
-        )
+        
+        print("Client connected to \(context.remoteAddress!)")
         
         var headers = HTTPHeaders()
-        headers.add(
-            name: "Host",
-            value: "\(client.host):\(client.port)"
-        )
-        request.headers = headers
         
-        context.channel.write(NIOAny(HTTPClientRequestPart.head(request)), promise: nil)
-        context.channel.writeAndFlush(NIOAny(HTTPClientRequestPart.end(nil)), promise: nil)
+        headers.add(name: "Host", value: "\(client.host):\(client.port)")
+        headers.add(name: "Origin", value: "http://localhost")
+        headers.add(name: "Content-Type", value: "text/plain; charset=utf-8")
+        headers.add(name: "Content-Length", value: "\(0)")
+        
+        let requestHead = HTTPRequestHead(
+            version: .http1_1,
+            method: .GET,
+            uri: "v1/realtime?project=613b18dabf74a&channels[]=collections.6149afd52ce3b.documents",
+            headers: headers
+        )
+        
+        context.write(wrapOutboundOut(.head(requestHead)), promise: nil)
+        context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer()))), promise: nil)
+        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let response = unwrapInboundIn(data)
+
         switch response {
         case .head(let header):
+            print(String(describing: response))
             upgradeFailure(status: header.status)
-        case .body(_):
+            break
+        case .body(var body):
+            print(body.readString(length: body.readableBytes)!)
             break
         case .end(_):
             break

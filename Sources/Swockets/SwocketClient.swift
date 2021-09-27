@@ -158,8 +158,8 @@ public class SwocketClient {
         _ url: String,
         delegate: SwocketClientDelegate? = nil
     ) {
-        self.frameKey = "test"
         let rawUrl = URL(string: url)
+        self.frameKey = "test"
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 80
         self.uri = rawUrl?.path ?? "/"
@@ -204,8 +204,6 @@ public class SwocketClient {
         
         let basicUpgrader = NIOWebSocketClientUpgrader(
             requestKey: self.frameKey,
-            maxFrameSize: 1 << self.maxFrameSize,
-            automaticErrorHandling: false,
             upgradePipelineHandler: self.upgradePipelineHandler
         )
         
