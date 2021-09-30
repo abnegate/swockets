@@ -43,25 +43,21 @@ extension HTTPHandler : ChannelInboundHandler, RemovableChannelHandler {
     public typealias OutboundOut = HTTPClientRequestPart
     
     func channelActive(context: ChannelHandlerContext) {
-        
-        print("Client connected to \(context.remoteAddress!)")
-        
         var headers = HTTPHeaders()
         
         headers.add(name: "Host", value: "\(client.host):\(client.port)")
-        headers.add(name: "Origin", value: "http://localhost")
-        headers.add(name: "Content-Type", value: "text/plain; charset=utf-8")
-        headers.add(name: "Content-Length", value: "\(0)")
+        headers.add(name: "Content-Type", value: "text/plain")
+        headers.add(name: "Content-Length", value: "\(1)")
         
         let requestHead = HTTPRequestHead(
             version: .http1_1,
             method: .GET,
-            uri: "v1/realtime?project=613b18dabf74a&channels[]=collections.6149afd52ce3b.documents",
+            uri: client.uri,
             headers: headers
         )
         
         context.write(wrapOutboundOut(.head(requestHead)), promise: nil)
-        context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer()))), promise: nil)
+        context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer(string: "\r\n")))), promise: nil)
         context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
     }
 

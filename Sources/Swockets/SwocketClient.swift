@@ -159,7 +159,7 @@ public class SwocketClient {
         delegate: SwocketClientDelegate? = nil
     ) {
         let rawUrl = URL(string: url)
-        self.frameKey = "test"
+        self.frameKey = "tergregfgbsfdgfdsfgdbv=="
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 80
         self.uri = rawUrl?.path ?? "/"
