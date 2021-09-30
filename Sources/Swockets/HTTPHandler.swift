@@ -9,9 +9,11 @@ import Foundation
 class HTTPHandler {
 
     unowned var client: SwocketClient
+    let headers: HTTPHeaders
 
-    init(client: SwocketClient) {
+    init(client: SwocketClient, headers: HTTPHeaders) {
         self.client = client
+        self.headers = headers
     }
 
     func upgradeFailure(status: HTTPResponseStatus) {
@@ -48,6 +50,7 @@ extension HTTPHandler : ChannelInboundHandler, RemovableChannelHandler {
         headers.add(name: "Host", value: "\(client.host):\(client.port)")
         headers.add(name: "Content-Type", value: "text/plain")
         headers.add(name: "Content-Length", value: "\(1)")
+        headers.add(contentsOf: self.headers)
         
         let requestHead = HTTPRequestHead(
             version: .http1_1,

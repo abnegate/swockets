@@ -20,6 +20,7 @@ public class SwocketClient {
     let host: String
     let port: Int
     let uri: String
+    let headers: HTTPHeaders
     
     public private(set) var maxFrameSize: Int
     
@@ -132,17 +133,18 @@ public class SwocketClient {
         host: String,
         port: Int,
         uri: String,
+        headers: HTTPHeaders,
         frameKey: String,
         maxFrameSize: Int = 14,
         tlsEnabled: Bool = false,
         delegate: SwocketClientDelegate? = nil,
         onOpen: @escaping (Channel?) -> Void = { _ in}
     ) {
-        self.frameKey = frameKey
         self.host = host
         self.port = port
         self.uri = uri
-        self.onOpen = onOpen
+        self.headers = headers
+        self.frameKey = frameKey
         self.maxFrameSize = maxFrameSize
         self.tlsEnabled = tlsEnabled
         self.delegate = delegate
@@ -156,6 +158,7 @@ public class SwocketClient {
     ///     - delegate: Delegate to handle message and error callbacks.
     public init?(
         _ url: String,
+        headers: HTTPHeaders = HTTPHeaders(),
         delegate: SwocketClientDelegate? = nil
     ) {
         let rawUrl = URL(string: url)
@@ -163,6 +166,7 @@ public class SwocketClient {
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 80
         self.uri = rawUrl?.path ?? "/"
+        self.headers = headers
         self.maxFrameSize = 24
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
         self.delegate = delegate
@@ -200,7 +204,7 @@ public class SwocketClient {
     }
 
     private func openChannel(channel: Channel) -> EventLoopFuture<Void> {
-        let httpHandler = HTTPHandler(client: self)
+        let httpHandler = HTTPHandler(client: self, headers: headers)
         
         let basicUpgrader = NIOWebSocketClientUpgrader(
             requestKey: self.frameKey,
