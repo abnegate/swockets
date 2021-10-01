@@ -1,12 +1,11 @@
-//
-// Created by Jake Barnby on 10/09/21.
-//
-
 import Foundation
 import NIO
 import NIOHTTP1
 import NIOWebSocket
 
+/// Handles the HTTP pipeline for opening a WebSocket connection.
+///
+/// Adds the required headers to the outbound upgrade connection request and handles success and failures responses.
 class MessageHandler {
 
     private let client: SwocketClient
@@ -43,7 +42,7 @@ extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     return
                 }
                 if let delegate = client.delegate {
-                    delegate.onMessage(text: text)
+                    try! delegate.onMessage(text: text)
                 } else {
                     client.onTextMessage(text)
                 }
@@ -61,7 +60,7 @@ extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     return
                 }
                 if let delegate = client.delegate {
-                    delegate.onMessage(data: binaryData)
+                    try! delegate.onMessage(data: binaryData)
                 } else {
                     client.onBinaryMessage(binaryData)
                 }
@@ -81,7 +80,7 @@ extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     string.append(text)
                     isText = false
                     if let delegate = client.delegate {
-                        delegate.onMessage(text: string)
+                        try! delegate.onMessage(text: string)
                     } else {
                         client.onTextMessage(string)
                     }
@@ -98,7 +97,7 @@ extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
                     }
                     binaryBuffer.append(binaryData)
                     if let delegate = client.delegate {
-                        delegate.onMessage(data: binaryBuffer)
+                        try! delegate.onMessage(data: binaryBuffer)
                     } else {
                         client.onBinaryMessage(binaryBuffer)
                     }
@@ -129,9 +128,9 @@ extension MessageHandler: ChannelInboundHandler, RemovableChannelHandler {
     
     public func errorCaught(context: ChannelHandlerContext, error: Error) {
         if client.delegate != nil {
-            client.delegate?.onError(error: error, status: nil)
+            try! client.delegate?.onError(error: error, status: nil)
         } else {
-            client.onErrorCallBack(error, nil)
+            client.onError(error, nil)
         }
         client.close()
     }

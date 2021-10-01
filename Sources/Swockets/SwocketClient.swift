@@ -1,7 +1,3 @@
-///
-/// Created by Jake Barnby on 8/09/21.
-///
-
 import Foundation
 import NIO
 import NIOHTTP1
@@ -13,14 +9,19 @@ import NIOSSL
 
 public let SWOCKET_LOCKER_QUEUE = "SyncLocker"
 
+
+/// Creates and manages connections to a WebSocket server.
+///
+/// Creates a connection to the remote host and allows setting callbacks for messages sent from the WebSocket server.
 public class SwocketClient {
 
     // MARK: - Properties
-    let frameKey: String
     let host: String
     let port: Int
     let uri: String
+    let query: String
     let headers: HTTPHeaders
+    let frameKey: String
     
     public private(set) var maxFrameSize: Int
     
@@ -34,14 +35,27 @@ public class SwocketClient {
 
     weak var delegate: SwocketClientDelegate? = nil
 
+    /// Is this client currently connected to a WebSocket
     public var isConnected: Bool {
         channel?.isActive ?? false
     }
     
     // MARK: - Stored callbacks
     
-    private var onOpen: (Channel) -> Void = { _ in }
-
+    private var _openCallback: (Channel) -> Void = { _ in }
+    var onOpen: (Channel) -> Void {
+        get {
+            return locker.sync {
+                return _openCallback
+            }
+        }
+        set {
+            locker.sync {
+                _openCallback = newValue
+            }
+        }
+    }
+    
     private var _closeCallback: (Channel, Data) -> Void = { _,_ in }
     var onClose: (Channel, Data) -> Void {
         get {
@@ -85,7 +99,7 @@ public class SwocketClient {
     }
     
     private var _errorCallBack: (Error?, HTTPResponseStatus?) -> Void = { _,_ in }
-    var onErrorCallBack: (Error?, HTTPResponseStatus?) -> Void {
+    var onError: (Error?, HTTPResponseStatus?) -> Void {
         get {
             return locker.sync {
                 return _errorCallBack
@@ -100,20 +114,44 @@ public class SwocketClient {
     
     // MARK: - Callback setters
     
+    /// Set a callback to be fired when a WebSocket connection is opened.
+    ///
+    /// - parameters:
+    ///     - callback: Callback to fie when a WebSocket connection is opened
+    public func onOpen(_ callback: @escaping (Channel) -> Void) {
+        onOpen = callback
+    }
+    
+    /// Set a callback to be fired when a WebSocket text message is received.
+    ///
+    /// - parameters:
+    ///     - callback: Callback to fie when a WebSocket text message is received
     public func onMessage(_ callback: @escaping (String) -> Void) {
         onTextMessage = callback
     }
 
+    /// Set a callback to be fired when a WebSocket binary message is received.
+    ///
+    /// - parameters:
+    ///     - callback: Callback to fie when a WebSocket binary message is received
     public func onMessage(_ callback: @escaping (Data) -> Void) {
         onBinaryMessage = callback
     }
 
+    /// Set a callback to be fired when a WebSocket close message is received.
+    ///
+    /// - parameters:
+    ///     - callback: Callback to fie when a WebSocket close message is received
     public func onClose(_ callback: @escaping (Channel, Data) -> Void) {
         onClose = callback
     }
 
+    /// Set a callback to be fired when a WebSocket error occurs.
+    ///
+    /// - parameters:
+    ///     - callback: Callback to fie when a WebSocket error occurs
     public func onError(_ callback: @escaping (Error?, HTTPResponseStatus?) -> Void) {
-        onErrorCallBack = callback
+        onError = callback
     }
     
     // MARK: - Constructors
@@ -121,41 +159,40 @@ public class SwocketClient {
     /// Create a new `WebSocketClient`.
     ///
     /// - parameters:
-    ///     - host: Host name of the remote server
-    ///     - port: Port number on which the remote server is listening
-    ///     - uri : The "Request-URI" of the GET method, it is used to identify the endpoint of the WebSocket connection
-    ///     - frameKey: The key sent by client which server has to include while building it's response. This helps ensure that the server does not accept connections from non-WebSocket clients.
-    ///     - maxFrameSize : Maximum allowable frame size of WebSocket client is configured using this parameter.
-    ///                      Default value is `14`.
-    ///     - tlsEnabled: Is TLS enabled for this client.
-    ///     - delegate: Delegate to handle message and error callbacks
+    ///     - host:         Host name of the remote server
+    ///     - port:         Port number on which the remote server is listening
+    ///     - uri:          The "Request-URI" of the GET method, it is used to identify the endpoint of the WebSocket connection
+    ///     - frameKey:     The key sent by client which server has to include while building it's response.
+    ///     - maxFrameSize: Maximum allowable frame size of WebSocket client is configured using this parameter.
+    ///     - tlsEnabled:   Is TLS enabled for this client.
+    ///     - delegate:     Delegate to handle message and error callbacks
     public init?(
         host: String,
         port: Int,
         uri: String,
-        headers: HTTPHeaders,
+        query: String,
         frameKey: String,
+        headers: HTTPHeaders = HTTPHeaders(),
         maxFrameSize: Int = 14,
         tlsEnabled: Bool = false,
-        delegate: SwocketClientDelegate? = nil,
-        onOpen: @escaping (Channel?) -> Void = { _ in}
+        delegate: SwocketClientDelegate? = nil
     ) {
         self.host = host
         self.port = port
         self.uri = uri
+        self.query = query
         self.headers = headers
         self.frameKey = frameKey
         self.maxFrameSize = maxFrameSize
         self.tlsEnabled = tlsEnabled
         self.delegate = delegate
-        self.onOpen = onOpen
     }
 
     /// Create a new `WebSocketClient`.
     ///
     /// - parameters:
-    ///     - url : The "Request-URl" of the GET method, it is used to identify the endpoint of the WebSocket
-    ///     - delegate: Delegate to handle message and error callbacks.
+    ///     - url:          The absolute URL of the GET method used to identify the WebSocket endpoint
+    ///     - delegate:     Delegate to handle message and error callbacks.
     public init?(
         _ url: String,
         headers: HTTPHeaders = HTTPHeaders(),
@@ -166,6 +203,7 @@ public class SwocketClient {
         self.host = rawUrl?.host ?? "localhost"
         self.port = rawUrl?.port ?? 80
         self.uri = rawUrl?.path ?? "/"
+        self.query = rawUrl?.query ?? ""
         self.headers = headers
         self.maxFrameSize = 24
         self.tlsEnabled = rawUrl?.scheme == "wss" || rawUrl?.scheme == "https"
@@ -178,15 +216,8 @@ public class SwocketClient {
 
     // MARK: - Open connection
     
+    /// Open a connection to the configured host and attempt to upgrade the connection to a WebSocket. If successful the `onOpen` callback will fire, otherwise a connection error will be thrown from here.
     public func connect() throws {
-        do {
-            try openConnection()
-        } catch let error {
-            throw SwocketClientConnectionError.connectionFailed(error)
-        }
-    }
-
-    private func openConnection() throws {
         let socketOptions = ChannelOptions.socket(
             SocketOptionLevel(SOL_SOCKET),
             SO_REUSEPORT
@@ -247,7 +278,7 @@ public class SwocketClient {
     /// Closes the connection
     ///
     /// - parameters:
-    ///     - data: close frame payload, must be less than 125 bytes
+    ///     - data: Close frame payload
     public func close(data: Data = Data()) {
         closeSent = true
         
@@ -264,23 +295,26 @@ public class SwocketClient {
     }
     
     // MARK: - Send data
-
-    /// Sends binary-formatted data to the connected server in multiple frames
+    
+    /// Sends binary-formatted data  to the connected server in multiple frames.
     ///
     /// - parameters:
-    ///     - data: raw binary data to be sent in the frame
-    ///     - opcode: Websocket opcode indicating type of the frame
-    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
-    ///     - compressed: Whether to compress the current frame to be sent, by default compression is disabled
+    ///     - raw:          Raw data to be sent in the frame
+    ///     - opcode:       Websocket opcode indicating type of the frame
+    ///     - finalFrame:   Whether the frame to be sent is the last one
     public func send(
-        binary: Data,
-        opcode: WebSocketOpcode = .binary,
+        data: Data,
+        opcode: WebSocketOpcode,
         finalFrame: Bool = true
     ) {
         var buffer = ByteBufferAllocator()
-            .buffer(capacity: binary.count)
+            .buffer(capacity: data.count)
         
-        buffer.writeBytes(binary)
+        buffer.writeBytes(data)
+        
+        if opcode == .connectionClose {
+            self.closeSent = true
+        }
         
         send(
             data: buffer,
@@ -289,13 +323,12 @@ public class SwocketClient {
         )
     }
 
-    /// Sends text-formatted data to the connected server in multiple frames
+    /// Sends text-formatted data to the connected server in multiple frames.
     ///
     /// - parameters:
-    ///     - raw: raw text to be sent in the frame
-    ///     - opcode: Websocket opcode indicating type of the frame
-    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
-    ///     - compressed: Whether to compress the current frame to be sent, by default this set to `false`
+    ///     - raw:          Raw text to be sent in the frame
+    ///     - opcode:       Websocket opcode indicating type of the frame
+    ///     - finalFrame:   Whether the frame to be sent is the last one
     public func send(
         text: String,
         opcode: WebSocketOpcode = .text,
@@ -313,6 +346,13 @@ public class SwocketClient {
         )
     }
 
+    
+    /// Sends the JSON representation of the given model to the connected server in multiple frames.
+    ///
+    /// - parameters:
+    ///     - model:        The model to encode and send
+    ///     - opcode:       Websocket opcode indicating type of the frame
+    ///     - finalFrame:   Whether the frame to be sent is the last one
     public func send<T: Codable>(
         model: T,
         opcode: WebSocketOpcode = .text,
@@ -337,35 +377,13 @@ public class SwocketClient {
         }
     }
 
-    /// This function sends IOData(ByteBuffer) to the connected server
+    /// Sends buffered bytes to the connected server in multiple frames.
     ///
     /// - parameters:
-    ///     - data: ByteBuffer-formatted to be sent in the frame
-    ///     - opcode: Websocket opcode indicating type of the frame
-    ///     - finalFrame: Whether the frame to be sent is the last one, by default this is set to `true`
-    ///     - compressed: Whether to compress the current frame to be sent, by default this set to `false`
+    ///     - model:        The model to encode and send
+    ///     - opcode:       Websocket opcode indicating type of the frame
+    ///     - finalFrame:   Whether the frame to be sent is the last one
     public func send(
-        data: Data,
-        opcode: WebSocketOpcode,
-        finalFrame: Bool = true
-    ) {
-        var buffer = ByteBufferAllocator()
-            .buffer(capacity: data.count)
-        
-        buffer.writeBytes(data)
-        
-        if opcode == .connectionClose {
-            self.closeSent = true
-        }
-        
-        send(
-            data: buffer,
-            opcode: opcode,
-            finalFrame: finalFrame
-        )
-    }
-
-    private func send(
         data: ByteBuffer,
         opcode: WebSocketOpcode,
         finalFrame: Bool
@@ -376,11 +394,9 @@ public class SwocketClient {
             maskKey: nil,
             data: data
         )
-        
         guard let channel = channel else {
             return
         }
-        
         if finalFrame {
             channel.writeAndFlush(frame, promise: nil)
         } else {

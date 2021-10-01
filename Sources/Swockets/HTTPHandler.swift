@@ -1,14 +1,14 @@
-///
-/// Created by Jake Barnby on 9/09/21.
-///
-
 import NIO
 import NIOHTTP1
 import Foundation
 
+/// Handles the HTTP pipeline for opening a WebSocket connection.
+///
+/// Adds the required headers to the outbound upgrade connection request and handles success and failures responses.
 class HTTPHandler {
 
-    unowned var client: SwocketClient
+    unowned let client: SwocketClient
+    
     let headers: HTTPHeaders
 
     init(client: SwocketClient, headers: HTTPHeaders) {
@@ -20,18 +20,18 @@ class HTTPHandler {
         if let delegate = client.delegate {
             switch status {
             case .badRequest:
-                delegate.onError(error: SwocketClientError.badRequest, status: status)
+                try! delegate.onError(error: SwocketClientError.badRequest, status: status)
             case .notFound:
-                delegate.onError(error: SwocketClientError.notFound, status: status)
+                try! delegate.onError(error: SwocketClientError.notFound, status: status)
             default:
                 break
             }
         } else {
             switch status {
             case .badRequest:
-                client.onErrorCallBack(SwocketClientError.badRequest, status)
+                client.onError(SwocketClientError.badRequest, status)
             case .notFound:
-                client.onErrorCallBack(SwocketClientError.notFound, status)
+                client.onError(SwocketClientError.notFound, status)
             default:
                 break
             }
@@ -51,11 +51,10 @@ extension HTTPHandler : ChannelInboundHandler, RemovableChannelHandler {
         headers.add(name: "Content-Type", value: "text/plain")
         headers.add(name: "Content-Length", value: "\(1)")
         headers.add(contentsOf: self.headers)
-        
         let requestHead = HTTPRequestHead(
             version: .http1_1,
             method: .GET,
-            uri: client.uri,
+            uri: "\(client.uri)?\(client.query)",
             headers: headers
         )
         
@@ -82,9 +81,9 @@ extension HTTPHandler : ChannelInboundHandler, RemovableChannelHandler {
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         if client.delegate != nil {
-            client.delegate?.onError(error: error, status: nil)
+            try! client.delegate?.onError(error: error, status: nil)
         } else {
-            client.onErrorCallBack(error, nil)
+            client.onError(error, nil)
         }
     }
 }

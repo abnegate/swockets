@@ -1,7 +1,4 @@
-///
-/// Created by Jake Barnby on 9/09/21.
-///
-
+/// Error mapped HTTP codes
 enum SwocketClientError: UInt, Error {
     case notFound = 404
     case badRequest = 400
@@ -14,8 +11,4 @@ enum SwocketClientError: UInt, Error {
             return 400
         }
     }
-}
-
-enum SwocketClientConnectionError: Error {
-    case connectionFailed(_ error: Error)
 }
